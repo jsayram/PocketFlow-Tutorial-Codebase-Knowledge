@@ -18,6 +18,7 @@ __pycache__/
 .env.development
 .env.test
 .env.production
+.env.sample
 
 # Python virtual environments
 .venv/
@@ -107,3 +108,4 @@ uv.lock
 
 docs/*.pdf
 docs/design-cn.md
+.env.sample

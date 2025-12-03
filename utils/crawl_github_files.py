@@ -5,8 +5,274 @@ import tempfile
 import git
 import time
 import fnmatch
+import sys
 from typing import Union, Set, List, Dict, Tuple, Any
 from urllib.parse import urlparse
+import logging
+from dotenv import load_dotenv
+logger = logging.getLogger(__name__)
+
+
+def preview_file(files):
+    """
+    Allows selecting and previewing a specific file from the repository.
+    
+    Args:
+        files (dict): Dictionary mapping file paths to file contents
+        
+    Returns:
+        None: Displays file information to the console
+    """
+    if not files:
+        print("No files available to preview.")
+        return
+    
+    # Sort files alphabetically for easier navigation
+    sorted_files = sorted(files.keys())
+    
+    # Show file list with numbers for selection
+    print("\nAvailable files:")
+    for i, file_path in enumerate(sorted_files, 1):
+        print(f"[{i}] {file_path}")
+    
+    # Get user selection
+    while True:
+        try:
+            choice = input("\nEnter file number to preview (or 'q' to quit): ")
+            
+            if choice.lower() == 'q':
+                return
+                
+            file_index = int(choice) - 1
+            if 0 <= file_index < len(sorted_files):
+                selected_file = sorted_files[file_index]
+                break
+            else:
+                print(f"Invalid selection. Please enter a number between 1 and {len(sorted_files)}.")
+        except ValueError:
+            print("Please enter a valid number or 'q' to quit.")
+    
+    # Get file content
+    file_content = files[selected_file]
+    file_size = len(file_content)
+    
+    # Show file information
+    print("\n" + "="*50)
+    print(f"File: {selected_file}")
+    print(f"Size: {file_size} characters")
+    
+    # Determine file type for better explanation
+    file_extension = selected_file.split('.')[-1] if '.' in selected_file else 'unknown'
+    file_type_descriptions = {
+        'py': 'Python source code',
+        'md': 'Markdown document',
+        'txt': 'Text file',
+        'json': 'JSON data file',
+        'yml': 'YAML configuration file',
+        'yaml': 'YAML configuration file',
+        'js': 'JavaScript source code',
+        'html': 'HTML document',
+        'css': 'CSS stylesheet',
+        'gitignore': 'Git ignore rules',
+        'env': 'Environment variables file',
+        'c': 'C source code',
+        'cpp': 'C++ source code',
+        'cs': 'C# source code',
+        'java': 'Java source code',
+        'go': 'Go source code',
+        'rb': 'Ruby source code',
+        'php': 'PHP source code',
+        'swift': 'Swift source code',
+        'rs': 'Rust source code',
+        'kt': 'Kotlin source code', 
+        'html': 'HTML document',
+        'xml': 'XML document',
+        'sql': 'SQL database file',
+        'csv': 'Comma-separated values file',
+        'log': 'Log file',
+        'sh': 'Shell script',
+        'bash': 'Bash script',
+        'ps1': 'PowerShell script',
+        'pl': 'Perl script',
+        'r': 'R script',
+        'dart': 'Dart source code',
+        'ts': 'TypeScript source code',
+        'vue': 'Vue.js component',
+        'jsx': 'React JSX file',
+        'tsx': 'React TSX file',
+        'less': 'Less CSS file',
+        'scss': 'Sass CSS file',
+        'dockerfile': 'Dockerfile',
+        'makefile': 'Makefile',
+        'properties': 'Java properties file',
+    }
+    
+    file_type = file_type_descriptions.get(file_extension, f"File with .{file_extension} extension")
+    print(f"Type: {file_type}")
+    print("="*50)
+    
+    # Ask for preview length
+    preview_lines = 10
+    try:
+        preview_input = input(f"\nHow many lines to preview? (default: {preview_lines}): ")
+        if preview_input.strip():
+            preview_lines = int(preview_input)
+    except ValueError:
+        print(f"Using default preview length of {preview_lines} lines.")
+    
+    # Show content preview with line numbers
+    print("\nContent preview:")
+    print("-"*50)
+    
+    lines = file_content.split('\n')
+    for i, line in enumerate(lines[:preview_lines], 1):
+        print(f"{i:3d} | {line}")
+    
+    if len(lines) > preview_lines:
+        print(f"\n... and {len(lines) - preview_lines} more lines")
+    
+    # Offer to see more of the file
+    while True:
+        action = input("\nOptions: [m]ore lines, [a]ll content, [f]ind text, [b]ack to file list, [q]uit: ").lower()
+        
+        if action == 'm':
+            try:
+                more_lines = int(input("How many more lines? "))
+                print("\nContent continued:")
+                print("-"*50)
+                for i, line in enumerate(lines[preview_lines:preview_lines+more_lines], preview_lines+1):
+                    print(f"{i:3d} | {line}")
+                preview_lines += more_lines
+            except ValueError:
+                print("Please enter a valid number.")
+                
+        elif action == 'a':
+            print("\nFull content:")
+            print("-"*50)
+            for i, line in enumerate(lines, 1):
+                print(f"{i:3d} | {line}")
+                
+        elif action == 'f':
+            search_term = input("Enter text to find: ")
+            if search_term:
+                print(f"\nLines containing '{search_term}':")
+                print("-"*50)
+                found = False
+                for i, line in enumerate(lines, 1):
+                    if search_term.lower() in line.lower():
+                        print(f"{i:3d} | {line}")
+                        found = True
+                if not found:
+                    print(f"No matches found for '{search_term}'")
+            
+        elif action == 'b':
+            preview_file(files)  # Recursive call to restart the preview process
+            return
+            
+        elif action == 'q':
+            return
+            
+        else:
+            print("Invalid option.")
+
+
+def ensure_github_url():
+    """
+    Ensures the GITHUB_URL environment variable is available.
+    Loads from .env file if present and checks for the URL.
+    
+    Returns:
+        str: The GitHub URL if found
+        
+    Raises:
+        Exception: If GitHub URL is not found after attempting to load it
+    """
+    # First, try to find and load the .env file from multiple possible locations
+    # This is shared with ensure_api_key to maintain consistency
+    env_locations = [
+        '.env',                                  # Current directory
+        '../.env',                               # Parent directory
+        os.path.join(os.path.dirname(__file__), '../.env'),  # Project root relative to this script
+        os.path.expanduser('~/.env')             # Home directory
+    ]
+    
+    # Try each location if environment isn't already loaded
+    if not os.environ.get("GITHUB_URL") and not os.environ.get("GITHUB_TOKEN"):
+        env_loaded = False
+        for env_path in env_locations:
+            if os.path.exists(env_path):
+                logger.info(f"Found .env file at {env_path}")
+                load_dotenv(env_path)
+                env_loaded = True
+                break
+        
+        # If no .env file was found, try to find one automatically
+        if not env_loaded:
+            logger.info("No .env file found in standard locations, searching...")
+            env_path = find_dotenv(usecwd=True)
+            if env_path:
+                logger.info(f"Found .env file at {env_path}")
+                load_dotenv(env_path)
+                env_loaded = True
+            else:
+                logger.warning("No .env file found")
+    
+    # Check if the GitHub URL exists in environment variables
+    github_url = os.environ.get("GITHUB_URL")
+    if not github_url:
+        # Check common variants of the variable name
+        for var_name in ["REPO_URL", "REPOSITORY_URL", "GIT_REPO"]:
+            logger.info(f"GITHUB_URL not found, checking {var_name}...")
+            github_url = os.environ.get(var_name)
+            if github_url:
+                logger.info(f"Using {var_name} instead of GITHUB_URL")
+                os.environ["GITHUB_URL"] = github_url
+                break
+    
+    # Also check for GitHub token as it's often needed together
+    github_token = os.environ.get("GITHUB_TOKEN")
+    if github_token:
+        logger.info("GITHUB_TOKEN found in environment variables")
+    else:
+        logger.warning("GITHUB_TOKEN not found in environment variables - may have limited API access")
+    
+    # If still no GitHub URL, provide help
+    if not github_url:
+        logger.error("No GitHub URL found in environment variables")
+        print("\n" + "="*50)
+        print("GITHUB URL CONFIGURATION ERROR")
+        print("="*50)
+        print("\nYour .env file should contain:")
+        print("\nGITHUB_URL=https://github.com/username/repository")
+        print("\nAnd optionally:")
+        print("GITHUB_TOKEN=your-github-token")
+        print("\nLocation of .env file should be in the project root directory")
+        print("\nCurrent working directory:", os.getcwd())
+        print("\nThe following .env file locations were checked:")
+        for path in env_locations:
+            if os.path.exists(path):
+                print(f" - {path} (EXISTS)")
+            else:
+                print(f" - {path} (not found)")
+        
+        print("\nEnvironment variables currently set:")
+        for key in sorted(os.environ.keys()):
+            if "URL" in key or "GITHUB" in key or "REPO" in key or "GIT" in key:
+                value = os.environ[key]
+                # Don't mask URLs as they're generally not sensitive
+                print(f" - {key}: {value}")
+        
+        raise Exception("GITHUB_URL not set in environment variables after loading .env file")
+    
+    # Validate URL format
+    if not github_url.startswith(("http://github.com/", "https://github.com/")):
+        logger.warning(f"GitHub URL format may be invalid: {github_url}")
+        print("WARNING: GitHub URL should be in the format https://github.com/username/repository")
+    
+    return github_url
+
+
+
 
 def crawl_github_files(
     repo_url, 
@@ -332,40 +598,76 @@ def crawl_github_files(
 
 # Example usage
 if __name__ == "__main__":
-    # Get token from environment variable (recommended for private repos)
-    github_token = os.environ.get("GITHUB_TOKEN")
-    if not github_token:
-        print("Warning: No GitHub token found in environment variable 'GITHUB_TOKEN'.\n"
-              "Private repositories will not be accessible without a token.\n"
-              "To access private repos, set the environment variable or pass the token explicitly.")
-    
-    repo_url = "https://github.com/pydantic/pydantic/tree/6c38dc93f40a47f4d1350adca9ec0d72502e223f/pydantic"
-    
-    # Example: Get Python and Markdown files, but exclude test files
-    result = crawl_github_files(
-        repo_url, 
-        token=github_token,
-        max_file_size=1 * 1024 * 1024,  # 1 MB in bytes
-        use_relative_paths=True,  # Enable relative paths
-        include_patterns={"*.py", "*.md"},  # Include Python and Markdown files
-    )
-    
-    files = result["files"]
-    stats = result["stats"]
-    
-    print(f"\nDownloaded {stats['downloaded_count']} files.")
-    print(f"Skipped {stats['skipped_count']} files due to size limits or patterns.")
-    print(f"Base path for relative paths: {stats['base_path']}")
-    print(f"Include patterns: {stats['include_patterns']}")
-    print(f"Exclude patterns: {stats['exclude_patterns']}")
-    
-    # Display all file paths in the dictionary
-    print("\nFiles in dictionary:")
-    for file_path in sorted(files.keys()):
-        print(f"  {file_path}")
-    
-    # Example: accessing content of a specific file
-    if files:
-        sample_file = next(iter(files))
-        print(f"\nSample file: {sample_file}")
-        print(f"Content preview: {files[sample_file][:200]}...")
+    try:
+        # Try to load API key from .env file
+        git_url = ensure_github_url()
+        
+        # If we get here, the key was found
+        print("Github URL loaded successfully!")
+        git_url_preview = git_url  # Get the last part of the URL
+        print(f"using repo giturl: {git_url_preview}")
+        
+        # Get token from environment variable (recommended for private repos)
+        github_token = os.environ.get("GITHUB_TOKEN")
+        if not github_token:
+            print("Warning: No GitHub token found in environment variable 'GITHUB_TOKEN'.\n"
+                "Private repositories will not be accessible without a token.\n"
+                "To access private repos, set the environment variable or pass the token explicitly.")
+        
+        repo_url = os.environ.get("GITHUB_URL")  # Replace with your GitHub repo URL
+        
+        # Example: Get Python and Markdown files, but exclude test files
+        result = crawl_github_files(
+            repo_url, 
+            token=github_token,
+            #max_file_size=1 * 1024 * 1024,  # 1 MB in bytes
+            use_relative_paths=True,  # Enable relative paths
+            # include_patterns={"*.py", "*.md", "src/**/*.js", "*.cs"},  # Only include these patterns
+            # exclude_patterns= { "tests/*", 
+            #     "docs/*", 
+            #     "**/node_modules/**", 
+            #     "**/.vscode/**", 
+            #     "**/.venv/**", 
+            #     "**/__pycache__/**",
+            #     "**/.vscode/**", 
+            #     "**/.venv/**", 
+            #     "**/__pycache__/**",
+            #     "**/.git/**"
+            # },  
+            # Exclude these patterns
+            include_patterns={"*.py", "*.md", "src/**/*.js","*.cs"},  # Only include these patterns
+            exclude_patterns= { "tests/*",
+                "**/node_modules/**", 
+                "**/.vscode/**", 
+                "**/.venv/**", 
+                "**/__pycache__/**",
+                "**/.vscode/**", 
+                "**/.venv/**", 
+                "**/__pycache__/**",
+            }, 
+                               
+            max_file_size=500000  # Skip files larger than 500KB
+        )
+        
+        files = result["files"]
+        stats = result["stats"]
+        
+        print(f"\nDownloaded {stats['downloaded_count']} files.")
+        print(f"Skipped {stats['skipped_count']} files due to size limits or patterns.")
+        print(f"Base path for relative paths: {stats['base_path']}")
+        print(f"Include patterns: {stats['include_patterns']}")
+        print(f"Exclude patterns: {stats['exclude_patterns']}")
+        
+        # Display all file paths in the dictionary
+        print("\nFiles in dictionary:")
+        for file_path in sorted(files.keys()):
+            print(f"  {file_path}")
+        
+        # Example: accessing content of a specific file
+        if files:
+            sample_file = next(iter(files))
+            print(f"Repository crawled successfully! Found {len(files)} files.")
+            preview_file(files)
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)
