@@ -32,93 +32,99 @@ def crawl_local_files(
     gitignore_spec = None
     if os.path.exists(gitignore_path):
         try:
-            with open(gitignore_path, "r", encoding="utf-8") as f:
+            with open(gitignore_path, "r", encoding="utf-8-sig") as f:
                 gitignore_patterns = f.readlines()
-            gitignore_spec = pathspec.PathSpec.from_lines(
-                "gitwildmatch", gitignore_patterns
-            )
+            gitignore_spec = pathspec.PathSpec.from_lines("gitwildmatch", gitignore_patterns)
             print(f"Loaded .gitignore patterns from {gitignore_path}")
         except Exception as e:
-            print(
-                f"Warning: Could not read or parse .gitignore file {gitignore_path}: {e}"
-            )
-    # --- End Load .gitignore ---
+            print(f"Warning: Could not read or parse .gitignore file {gitignore_path}: {e}")
 
+    all_files = []
     for root, dirs, files in os.walk(directory):
-        # Filter directories using .gitignore and exclude_patterns early to avoid descending
-        # Need to process dirs list *in place* for os.walk to respect it
+        # Filter directories using .gitignore and exclude_patterns early
         excluded_dirs = set()
         for d in dirs:
             dirpath_rel = os.path.relpath(os.path.join(root, d), directory)
 
-            # Check against .gitignore (important for directories)
             if gitignore_spec and gitignore_spec.match_file(dirpath_rel):
                 excluded_dirs.add(d)
-                continue  # Skip further checks if gitignored
+                continue
 
-            # Check against standard exclude_patterns
             if exclude_patterns:
                 for pattern in exclude_patterns:
-                    # Match pattern against full relative path or directory name itself
-                    if fnmatch.fnmatch(dirpath_rel, pattern) or fnmatch.fnmatch(
-                        d, pattern
-                    ):
+                    if fnmatch.fnmatch(dirpath_rel, pattern) or fnmatch.fnmatch(d, pattern):
                         excluded_dirs.add(d)
                         break
 
-        # Modify dirs in-place: remove excluded ones
-        # Iterate over a copy (.copy()) because we are modifying the list during iteration
         for d in dirs.copy():
             if d in excluded_dirs:
                 dirs.remove(d)
 
-        # Now process files in the non-excluded directories
         for filename in files:
             filepath = os.path.join(root, filename)
+            all_files.append(filepath)
 
-            # Get path relative to directory if requested
-            if use_relative_paths:
-                relpath = os.path.relpath(filepath, directory)
-            else:
-                relpath = filepath
+    total_files = len(all_files)
+    processed_files = 0
 
-            # --- Exclusion check ---
-            excluded = False
-            # 1. Check .gitignore first
-            if gitignore_spec and gitignore_spec.match_file(relpath):
-                excluded = True
+    for filepath in all_files:
+        relpath = os.path.relpath(filepath, directory) if use_relative_paths else filepath
 
-            # 2. Check standard exclude_patterns if not already excluded by .gitignore
-            if not excluded and exclude_patterns:
-                for pattern in exclude_patterns:
-                    if fnmatch.fnmatch(relpath, pattern):
-                        excluded = True
-                        break
+        # --- Exclusion check ---
+        excluded = False
+        if gitignore_spec and gitignore_spec.match_file(relpath):
+            excluded = True
 
-            included = False
-            if include_patterns:
-                for pattern in include_patterns:
-                    if fnmatch.fnmatch(relpath, pattern):
-                        included = True
-                        break
-            else:
-                # If no include patterns, include everything *not excluded*
-                included = True
+        if not excluded and exclude_patterns:
+            for pattern in exclude_patterns:
+                if fnmatch.fnmatch(relpath, pattern):
+                    excluded = True
+                    break
 
-            # Skip if not included or if excluded (by either method)
-            if not included or excluded:
-                continue
+        included = False
+        if include_patterns:
+            for pattern in include_patterns:
+                if fnmatch.fnmatch(relpath, pattern):
+                    included = True
+                    break
+        else:
+            included = True
 
-            # Check file size
-            if max_file_size and os.path.getsize(filepath) > max_file_size:
-                continue
+        processed_files += 1 # Increment processed count regardless of inclusion/exclusion
 
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    content = f.read()
-                files_dict[relpath] = content
-            except Exception as e:
-                print(f"Warning: Could not read file {filepath}: {e}")
+        status = "processed"
+        if not included or excluded:
+            status = "skipped (excluded)"
+            # Print progress for skipped files due to exclusion
+            if total_files > 0:
+                percentage = (processed_files / total_files) * 100
+                rounded_percentage = int(percentage)
+                print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
+            continue # Skip to next file if not included or excluded
+
+        if max_file_size and os.path.getsize(filepath) > max_file_size:
+            status = "skipped (size limit)"
+            # Print progress for skipped files due to size limit
+            if total_files > 0:
+                percentage = (processed_files / total_files) * 100
+                rounded_percentage = int(percentage)
+                print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
+            continue # Skip large files
+
+        # --- File is being processed ---        
+        try:
+            with open(filepath, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+            files_dict[relpath] = content
+        except Exception as e:
+            print(f"Warning: Could not read file {filepath}: {e}")
+            status = "skipped (read error)"
+
+        # --- Print progress for processed or error files ---
+        if total_files > 0:
+            percentage = (processed_files / total_files) * 100
+            rounded_percentage = int(percentage)
+            print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
 
     return {"files": files_dict}
 
